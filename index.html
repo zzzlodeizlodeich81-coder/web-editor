@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <title>Веб Видеоредактор</title>
+  <title>Веб Видеоредактор с AI Переходами</title>
   <style>
     body {
       font-family: sans-serif;
@@ -156,6 +156,37 @@
       gap: 10px;
       align-items: center;
     }
+    /* Модальное окно для AI кадров */
+    .ai-modal {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.8);
+      z-index: 100;
+      justify-content: center;
+      align-items: center;
+    }
+    .ai-modal-content {
+      background: #2a2a2a;
+      padding: 20px;
+      border-radius: 8px;
+      max-width: 600px;
+      width: 100%;
+      border: 1px solid #444;
+    }
+    .ai-preview-row {
+      display: flex;
+      gap: 15px;
+      justify-content: space-around;
+      margin: 15px 0;
+    }
+    .ai-preview-box img {
+      width: 200px;
+      aspect-ratio: 16/9;
+      object-fit: cover;
+      border: 1px solid #555;
+      border-radius: 4px;
+    }
   </style>
 </head>
 <body>
@@ -182,6 +213,7 @@
     <button id="snapshotBtn" disabled>📸 Снимок</button>
     <button id="addTextBtn" disabled>✍ Текст</button>
     <button id="muteBtn" disabled>🔊 Звук: Вкл</button>
+    <button id="aiTransitionBtn" disabled style="background: #673ab7;">✨ AI Переход (Kling)</button>
 
     <select id="exportRes">
       <option value="1280x720">HD (720p)</option>
@@ -229,6 +261,32 @@
   </div>
 </div>
 
+<!-- Модальное окно для AI-перехода -->
+<div class="ai-modal" id="aiModal">
+  <div class="ai-modal-content">
+    <h3>Генерация перехода через Kling AI</h3>
+    <p>Экспортированы крайние кадры для стыка выбранных клипов. Вы можете использовать их в качестве Start/End image в нейросети.</p>
+    <div class="ai-preview-row">
+      <div class="ai-preview-box">
+        <div style="font-size:12px; margin-bottom:5px;">Конец клипа А (Start):</div>
+        <img id="aiFrameA" src="" alt="Frame A">
+      </div>
+      <div class="ai-preview-box">
+        <div style="font-size:12px; margin-bottom:5px;">Начало клипа Б (End):</div>
+        <img id="aiFrameB" src="" alt="Frame B">
+      </div>
+    </div>
+    <div style="margin-top: 15px;">
+      <label style="font-size:13px; display:block; margin-bottom:5px;">Промпт для генерации перехода:</label>
+      <input type="text" id="aiPromptInput" value="Cinematic smooth morphing transition, cinematic lighting, 4k" style="width:100%; box-sizing:border-box; margin-bottom:15px;">
+    </div>
+    <div style="display: flex; gap: 10px; justify-content: flex-end;">
+      <button id="aiCloseModalBtn" style="background:#444;">Закрыть</button>
+      <button id="aiDownloadFramesBtn" style="background:#2e7d32;">💾 Скачать кадры для Kling</button>
+    </div>
+  </div>
+</div>
+
 <audio id="externalAudio"></audio>
 
 <script>
@@ -244,6 +302,7 @@
   const snapshotBtn = document.getElementById('snapshotBtn');
   const addTextBtn = document.getElementById('addTextBtn');
   const muteBtn = document.getElementById('muteBtn');
+  const aiTransitionBtn = document.getElementById('aiTransitionBtn');
   const exportBtn = document.getElementById('exportBtn');
 
   const exportRes = document.getElementById('exportRes');
@@ -262,6 +321,13 @@
   const audioTrack = document.getElementById('audioTrack');
   const playhead = document.getElementById('playhead');
 
+  const aiModal = document.getElementById('aiModal');
+  const aiCloseModalBtn = document.getElementById('aiCloseModalBtn');
+  const aiDownloadFramesBtn = document.getElementById('aiDownloadFramesBtn');
+  const aiFrameA = document.getElementById('aiFrameA');
+  const aiFrameB = document.getElementById('aiFrameB');
+  const aiPromptInput = document.getElementById('aiPromptInput');
+
   let videoClips = [];
   let audioClips = [];
   let textElements = [];
@@ -277,7 +343,8 @@
   let isPlaying = false;
   let animId = null;
 
-  // Быстрая генерация превью в фоновом режиме (как было, но с легковесным холстом)
+  let lastExtractedFrames = { a: null, b: null };
+
   async function generateThumbnails(clip) {
     if (clip.thumbnails) return;
     clip.thumbnails = [];
@@ -289,7 +356,7 @@
     
     await new Promise(r => { v.onloadedmetadata = r; });
 
-    const count = 2; // Уменьшили до 2 превью на клип для мгновенной отрисовки
+    const count = 2;
     const step = (clip.end - clip.start) / (count + 1);
     const canvas = document.createElement('canvas');
     canvas.width = 40; canvas.height = 24;
@@ -305,13 +372,13 @@
           r();
         };
         v.addEventListener('seeked', onSeeked);
-        setTimeout(r, 100); // Защита от зависания событий seeked
+        setTimeout(r, 100);
       });
 
       try {
         ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
         clip.thumbnails.push(canvas.toDataURL('image/jpeg', 0.3));
-        renderVideoTrack(); // Сразу обновляем дорожку по мере готовности
+        renderVideoTrack();
       } catch (e) {
         break;
       }
@@ -337,8 +404,6 @@
         thumbnails: null
       };
       videoClips.push(clip);
-      
-      // Запускаем фоном без блокировки интерфейса
       generateThumbnails(clip);
     }
 
@@ -493,7 +558,8 @@
 
   function enableControls() {
     playBtn.disabled = false; splitBtn.disabled = false; deleteBtn.disabled = false;
-    snapshotBtn.disabled = false; addTextBtn.disabled = false; muteBtn.disabled = false; exportBtn.disabled = false;
+    snapshotBtn.disabled = false; addTextBtn.disabled = false; muteBtn.disabled = false; 
+    aiTransitionBtn.disabled = false; exportBtn.disabled = false;
   }
 
   function formatTime(s) {
@@ -538,10 +604,10 @@
       if (index < videoClips.length - 1) {
         const btn = document.createElement('span');
         btn.className = 'transition-badge';
-        btn.innerText = clip.transition === 'none' ? '⚡ Склейка' : (clip.transition === 'fade' ? '🌑 Затух (2с)' : '✨ Микс (2с)');
+        btn.innerText = clip.transition === 'none' ? '⚡ Склейка' : (clip.transition === 'fade' ? '🌑 Затух' : '✨ AI Переход');
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
-          const modes = ['none', 'fade', 'crossfade'];
+          const modes = ['none', 'fade', 'ai'];
           clip.transition = modes[(modes.indexOf(clip.transition) + 1) % modes.length];
           renderVideoTrack();
         });
@@ -653,6 +719,72 @@
 
   playBtn.addEventListener('click', () => isPlaying ? pause() : play());
   muteBtn.addEventListener('click', () => { isMuted = !isMuted; activeVideo.muted = isMuted; nextVideo.muted = isMuted; muteBtn.innerText = isMuted ? '🔇 Звук: Выкл' : '🔊 Звук: Вкл'; });
+
+  // Логика вызова AI-перехода для текущего выбранного или текущего активного стыка
+  aiTransitionBtn.addEventListener('click', async () => {
+    if (videoClips.length < 2) return;
+    pause();
+
+    // Берем текущий клип (или первый попавшийся, если ничего не выбрано)
+    let targetIndex = 0;
+    if (selectedObject && selectedObject.type === 'video') {
+      const idx = videoClips.findIndex(c => c.id === selectedObject.id);
+      if (idx !== -1 && idx < videoClips.length - 1) targetIndex = idx;
+    }
+
+    const clipA = videoClips[targetIndex];
+    const clipB = videoClips[targetIndex + 1];
+
+    // Достаем последний кадр Клипа А
+    const vA = document.createElement('video');
+    vA.src = clipA.src; vA.muted = true;
+    await new Promise(r => vA.onloadedmetadata = r);
+    vA.currentTime = clipA.end - 0.05;
+    await new Promise(r => {
+      vA.onseeked = r;
+      setTimeout(r, 200);
+    });
+
+    const canvasA = document.createElement('canvas');
+    canvasA.width = vA.videoWidth || 1280; canvasA.height = vA.videoHeight || 720;
+    canvasA.getContext('2d').drawImage(vA, 0, 0);
+    lastExtractedFrames.a = canvasA.toDataURL('image/jpeg', 0.9);
+
+    // Достаем первый кадр Клипа Б
+    const vB = document.createElement('video');
+    vB.src = clipB.src; vB.muted = true;
+    await new Promise(r => vB.onloadedmetadata = r);
+    vB.currentTime = clipB.start;
+    await new Promise(r => {
+      vB.onseeked = r;
+      setTimeout(r, 200);
+    });
+
+    const canvasB = document.createElement('canvas');
+    canvasB.width = vB.videoWidth || 1280; canvasB.height = vB.videoHeight || 720;
+    canvasB.getContext('2d').drawImage(vB, 0, 0);
+    lastExtractedFrames.b = canvasB.toDataURL('image/jpeg', 0.9);
+
+    // Показываем модальное окно с готовыми кадрами
+    aiFrameA.src = lastExtractedFrames.a;
+    aiFrameB.src = lastExtractedFrames.b;
+    aiModal.style.display = 'flex';
+  });
+
+  aiCloseModalBtn.addEventListener('click', () => {
+    aiModal.style.display = 'none';
+  });
+
+  aiDownloadFramesBtn.addEventListener('click', () => {
+    // Скачиваем оба кадра для удобства ручной загрузки в Kling AI
+    const a1 = document.createElement('a');
+    a1.href = lastExtractedFrames.a; a1.download = 'kling_start_frame.jpg'; a1.click();
+    
+    setTimeout(() => {
+      const a2 = document.createElement('a');
+      a2.href = lastExtractedFrames.b; a2.download = 'kling_end_frame.jpg'; a2.click();
+    }, 300);
+  });
 
   splitBtn.addEventListener('click', () => {
     if (!selectedObject || selectedObject.type !== 'video') return;
@@ -790,10 +922,6 @@
           if (st.clip.transition === 'fade') {
             ctx.fillStyle = `rgba(0,0,0, ${1.0 - progress})`;
             ctx.fillRect(0, 0, w, h);
-          } else if (st.clip.transition === 'crossfade') {
-            await drawFrame(tempVid2, next.src, next.start + (transitionDuration - timeToEnd));
-            ctx.globalAlpha = 1.0 - progress;
-            ctx.drawImage(tempVid2, 0, 0, w, h);
           }
           ctx.restore();
         } else {
