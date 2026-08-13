@@ -24,6 +24,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      transition: aspect-ratio 0.3s ease;
     }
     .player-screen video {
       position: absolute;
@@ -141,7 +142,6 @@
       font-size: 12px;
     }
 
-    /* Кастомная рамка-бегунок (плейхед) как в CapCut */
     .playhead {
       position: absolute;
       top: 0; bottom: 0; width: 14px;
@@ -179,7 +179,6 @@
       gap: 10px;
       align-items: center;
     }
-    /* Модальное окно для AI кадров */
     .ai-modal {
       display: none;
       position: fixed;
@@ -239,18 +238,17 @@
     <button id="aiTransitionBtn" disabled style="background: #673ab7;">✨ AI Переход (Kling)</button>
 
     <select id="exportRes">
-      <option value="1280x720">HD (720p)</option>
-      <option value="1920x1080" selected>Full HD (1080p)</option>
+      <option value="original" selected>Исходное разрешение (Авто)</option>
+      <option value="720x1280">Вертикальное (HD 720p)</option>
+      <option value="1080x1920">Вертикальное (Full HD 1080p)</option>
+      <option value="1280x720">Горизонтальное (HD)</option>
+      <option value="1920x1080">Горизонтальное (Full HD)</option>
     </select>
     <select id="exportFps">
       <option value="30" selected>30 FPS</option>
       <option value="60">60 FPS</option>
     </select>
-    <select id="exportFormat">
-      <option value="webm" selected>WebM</option>
-      <option value="mp4">MP4 (если поддерживается)</option>
-    </select>
-    <button id="exportBtn" disabled>✨ Экспорт</button>
+    <button id="exportBtn" disabled>✨ Экспорт (WebM)</button>
   </div>
 
   <!-- Панель настроек текста -->
@@ -288,8 +286,7 @@
 <div class="ai-modal" id="aiModal">
   <div class="ai-modal-content">
     <h3>Генерация перехода через Kling AI</h3>
-    <p>💡 <b>Совет:</b> Для корректной работы AI-перехода и правильной стыковки убедитесь, что на таймлайне соединены строго 2 целевых отрезка видео.</p>
-    <p style="font-size: 13px; color: #bbb;">Экспортированы крайние кадры для стыка выбранных клипов. Вы можете использовать их в качестве Start/End image в нейросети:</p>
+    <p>💡 <b>Совет:</b> Для корректной работы AI-перехода убедитесь, что соединены строго 2 целевых отрезка видео.</p>
     <div class="ai-preview-row">
       <div class="ai-preview-box">
         <div style="font-size:12px; margin-bottom:5px;">Конец клипа А (Start):</div>
@@ -301,12 +298,12 @@
       </div>
     </div>
     <div style="margin-top: 15px;">
-      <label style="font-size:13px; display:block; margin-bottom:5px;">Промпт для генерации перехода:</label>
+      <label style="font-size:13px; display:block; margin-bottom:5px;">Промпт:</label>
       <input type="text" id="aiPromptInput" value="Cinematic smooth morphing transition, cinematic lighting, 4k" style="width:100%; box-sizing:border-box; margin-bottom:15px;">
     </div>
     <div style="display: flex; gap: 10px; justify-content: flex-end;">
       <button id="aiCloseModalBtn" style="background:#444;">Закрыть</button>
-      <button id="aiDownloadFramesBtn" style="background:#2e7d32;">💾 Скачать кадры для Kling</button>
+      <button id="aiDownloadFramesBtn" style="background:#2e7d32;">💾 Скачать кадры</button>
     </div>
   </div>
 </div>
@@ -319,6 +316,7 @@
   const videoA = document.getElementById('videoA');
   const videoB = document.getElementById('videoB');
   const externalAudio = document.getElementById('externalAudio');
+  const playerScreen = document.getElementById('playerScreen');
   
   const playBtn = document.getElementById('playBtn');
   const splitBtn = document.getElementById('splitBtn');
@@ -331,7 +329,6 @@
 
   const exportRes = document.getElementById('exportRes');
   const exportFps = document.getElementById('exportFps');
-  const exportFormat = document.getElementById('exportFormat');
   const textConfigPanel = document.getElementById('textConfigPanel');
   const textContentInput = document.getElementById('textContentInput');
   const textColorInput = document.getElementById('textColorInput');
@@ -351,7 +348,6 @@
   const aiDownloadFramesBtn = document.getElementById('aiDownloadFramesBtn');
   const aiFrameA = document.getElementById('aiFrameA');
   const aiFrameB = document.getElementById('aiFrameB');
-  const aiPromptInput = document.getElementById('aiPromptInput');
 
   let videoClips = [];
   let audioClips = [];
@@ -371,11 +367,7 @@
   let lastExtractedFrames = { a: null, b: null };
 
   let isDraggingPlayhead = false;
-  playhead.addEventListener('mousedown', (e) => {
-    isDraggingPlayhead = true;
-    e.stopPropagation();
-  });
-
+  playhead.addEventListener('mousedown', (e) => { isDraggingPlayhead = true; e.stopPropagation(); });
   window.addEventListener('mousemove', (e) => {
     if (!isDraggingPlayhead || totalDuration <= 0) return;
     const rect = timelineTracks.getBoundingClientRect();
@@ -383,10 +375,7 @@
     let percentage = Math.max(0, Math.min(1, x / timelineTracks.clientWidth));
     seekToGlobalTime(percentage * totalDuration);
   });
-
-  window.addEventListener('mouseup', () => {
-    isDraggingPlayhead = false;
-  });
+  window.addEventListener('mouseup', () => { isDraggingPlayhead = false; });
 
   timelineTracks.addEventListener('click', (e) => {
     if (e.target === playhead || e.target.closest('.clip') || e.target.closest('.audio-clip')) return;
@@ -400,12 +389,8 @@
   async function generateThumbnails(clip) {
     if (clip.thumbnails) return;
     clip.thumbnails = [];
-    
     const v = document.createElement('video');
-    v.src = clip.src;
-    v.muted = true;
-    v.preload = 'metadata';
-    
+    v.src = clip.src; v.muted = true; v.preload = 'metadata';
     await new Promise(r => { v.onloadedmetadata = r; });
 
     const count = 4;
@@ -417,23 +402,22 @@
     for (let i = 1; i <= count; i++) {
       const time = clip.start + (i * step);
       v.currentTime = Math.min(time, clip.duration - 0.1);
-      
       await new Promise(r => {
-        const onSeeked = () => {
-          v.removeEventListener('seeked', onSeeked);
-          r();
-        };
+        const onSeeked = () => { v.removeEventListener('seeked', onSeeked); r(); };
         v.addEventListener('seeked', onSeeked);
         setTimeout(r, 100);
       });
-
       try {
         ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
         clip.thumbnails.push(canvas.toDataURL('image/jpeg', 0.4));
         renderVideoTrack();
-      } catch (e) {
-        break;
-      }
+      } catch (e) { break; }
+    }
+  }
+
+  function updatePlayerAspect() {
+    if (videoClips.length > 0 && activeVideo.videoWidth && activeVideo.videoHeight) {
+      playerScreen.style.aspectRatio = `${activeVideo.videoWidth} / ${activeVideo.videoHeight}`;
     }
   }
 
@@ -453,7 +437,9 @@
         start: 0, end: tempVid.duration,
         duration: tempVid.duration,
         transition: 'none',
-        thumbnails: null
+        thumbnails: null,
+        width: tempVid.videoWidth,
+        height: tempVid.videoHeight
       };
       videoClips.push(clip);
       generateThumbnails(clip);
@@ -463,6 +449,7 @@
     enableControls();
     recalculateTimeline();
     seekToGlobalTime(0);
+    updatePlayerAspect();
   });
 
   audioInput.addEventListener('change', async (e) => {
@@ -474,14 +461,7 @@
       const tempAud = document.createElement('audio');
       tempAud.src = url;
       await new Promise(r => tempAud.onloadedmetadata = r);
-
-      audioClips.push({
-        id: 'a_' + Date.now() + Math.random(),
-        file, src: url,
-        start: 0, end: tempAud.duration,
-        duration: tempAud.duration,
-        timelineOffset: 0
-      });
+      audioClips.push({ id: 'a_' + Date.now() + Math.random(), file, src: url, start: 0, end: tempAud.duration, duration: tempAud.duration, timelineOffset: 0 });
     }
 
     isMuted = true;
@@ -518,27 +498,13 @@
     recalculateTimeline();
   }
 
-  textContentInput.addEventListener('input', () => {
-    const txt = textElements.find(t => t.id === selectedTextId);
-    if (txt) { txt.text = textContentInput.value; renderTextOverlays(); }
-  });
-  textColorInput.addEventListener('input', () => {
-    const txt = textElements.find(t => t.id === selectedTextId);
-    if (txt) { txt.color = textColorInput.value; renderTextOverlays(); }
-  });
-  textStyleSelect.addEventListener('change', () => {
-    const txt = textElements.find(t => t.id === selectedTextId);
-    if (txt) { txt.style = textStyleSelect.value; renderTextOverlays(); }
-  });
-  textSizeSelect.addEventListener('change', () => {
-    const txt = textElements.find(t => t.id === selectedTextId);
-    if (txt) { txt.size = parseInt(textSizeSelect.value); renderTextOverlays(); }
-  });
+  textContentInput.addEventListener('input', () => { const txt = textElements.find(t => t.id === selectedTextId); if (txt) { txt.text = textContentInput.value; renderTextOverlays(); } });
+  textColorInput.addEventListener('input', () => { const txt = textElements.find(t => t.id === selectedTextId); if (txt) { txt.color = textColorInput.value; renderTextOverlays(); } });
+  textStyleSelect.addEventListener('change', () => { const txt = textElements.find(t => t.id === selectedTextId); if (txt) { txt.style = textStyleSelect.value; renderTextOverlays(); } });
+  textSizeSelect.addEventListener('change', () => { const txt = textElements.find(t => t.id === selectedTextId); if (txt) { txt.size = parseInt(textSizeSelect.value); renderTextOverlays(); } });
   deleteTextBtn.addEventListener('click', () => {
     textElements = textElements.filter(t => t.id !== selectedTextId);
-    selectedTextId = null;
-    textConfigPanel.style.display = 'none';
-    renderTextOverlays();
+    selectedTextId = null; textConfigPanel.style.display = 'none'; renderTextOverlays();
   });
 
   function renderTextOverlays() {
@@ -550,7 +516,6 @@
       el.style.top = `${item.y}%`;
       el.style.fontSize = `${item.size}px`;
       el.style.color = item.color || '#ffffff';
-      el.style.transform = 'translate(-50%, -50%)';
       el.innerText = item.text;
       applyTextStyle(el, item.style, item.color);
 
@@ -559,33 +524,24 @@
         selectText(item.id);
         const rect = textOverlayLayer.getBoundingClientRect();
         let mouseX = e.clientX, mouseY = e.clientY, isDragging = true;
-
         const onMouseMove = (ME) => { if (isDragging) { mouseX = ME.clientX; mouseY = ME.clientY; } };
         const updatePos = () => {
           if (!isDragging) return;
           item.x = Math.max(5, Math.min(95, ((mouseX - rect.left) / rect.width) * 100));
           item.y = Math.max(5, Math.min(95, ((mouseY - rect.top) / rect.height) * 100));
-          el.style.left = `${item.x}%`;
-          el.style.top = `${item.y}%`;
+          el.style.left = `${item.x}%`; el.style.top = `${item.y}%`;
           requestAnimationFrame(updatePos);
         };
         requestAnimationFrame(updatePos);
-
-        const onMouseUp = () => {
-          isDragging = false;
-          window.removeEventListener('mousemove', onMouseMove);
-          window.removeEventListener('mouseup', onMouseUp);
-        };
-        window.addEventListener('mousemove', onMouseMove);
-        window.addEventListener('mouseup', onMouseUp);
+        const onMouseUp = () => { isDragging = false; window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
+        window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
       });
       textOverlayLayer.appendChild(el);
     });
   }
 
   function applyTextStyle(el, style, color = '#fff') {
-    el.style.fontFamily = 'sans-serif';
-    el.style.fontWeight = 'bold';
+    el.style.fontFamily = 'sans-serif'; el.style.fontWeight = 'bold';
     if (style === 'classic') { el.style.color = color; el.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)'; }
     else if (style === 'neon') { el.style.color = color; el.style.textShadow = `0 0 10px ${color}, 0 0 20px ${color}`; }
     else if (style === 'outline') { el.style.color = color; el.style.webkitTextStroke = '1px black'; }
@@ -595,11 +551,9 @@
   function drawTextOnCanvas(ctx, w, h, item) {
     ctx.save();
     ctx.font = `bold ${Math.round(item.size * (w / 950))}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     const x = (item.x / 100) * w, y = (item.y / 100) * h;
     const col = item.color || '#ffffff';
-    
     if (item.style === 'classic') { ctx.fillStyle = col; ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 10; }
     else if (item.style === 'neon') { ctx.fillStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 15; }
     else if (item.style === 'outline') { ctx.fillStyle = col; ctx.lineWidth = 4; ctx.strokeStyle = '#000'; ctx.strokeText(item.text, x, y); }
@@ -621,8 +575,7 @@
 
   function recalculateTimeline() {
     totalDuration = videoClips.reduce((acc, c) => acc + (c.end - c.start), 0);
-    renderVideoTrack();
-    renderAudioTrack();
+    renderVideoTrack(); renderAudioTrack();
     timeDisplay.innerText = `${formatTime(currentGlobalTime)} / ${formatTime(totalDuration)}`;
   }
 
@@ -640,8 +593,7 @@
       thumbsContainer.className = 'clip-thumbnails';
       if (clip.thumbnails) {
         clip.thumbnails.forEach(src => {
-          const img = document.createElement('img');
-          img.src = src;
+          const img = document.createElement('img'); img.src = src;
           thumbsContainer.appendChild(img);
         });
       }
@@ -656,7 +608,7 @@
       if (index < videoClips.length - 1) {
         const btn = document.createElement('span');
         btn.className = 'transition-badge';
-        btn.innerText = clip.transition === 'none' ? '⚡ Склейка' : (clip.transition === 'fade' ? '🌑 Затух' : '✨ AI Переход');
+        btn.innerText = clip.transition === 'none' ? '⚡ Склейка' : (clip.transition === 'fade' ? '🌑 Затух' : '✨ AI');
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           const modes = ['none', 'fade', 'ai'];
@@ -716,6 +668,7 @@
     activeVideo.classList.remove('active'); activeVideo.pause();
     const temp = activeVideo; activeVideo = nextVideo; nextVideo = temp;
     activeVideo.classList.add('active');
+    updatePlayerAspect();
   }
 
   function syncAudio(gTime, force = false) {
@@ -744,6 +697,7 @@
     syncAudio(currentGlobalTime, true);
     playhead.style.left = `${totalDuration ? (currentGlobalTime / totalDuration) * 100 : 0}%`;
     timeDisplay.innerText = `${formatTime(currentGlobalTime)} / ${formatTime(totalDuration)}`;
+    updatePlayerAspect();
   }
 
   function updateLoop() {
@@ -775,61 +729,39 @@
   aiTransitionBtn.addEventListener('click', async () => {
     if (videoClips.length < 2) return;
     pause();
-
     let targetIndex = 0;
     if (selectedObject && selectedObject.type === 'video') {
       const idx = videoClips.findIndex(c => c.id === selectedObject.id);
       if (idx !== -1 && idx < videoClips.length - 1) targetIndex = idx;
     }
+    const clipA = videoClips[targetIndex], clipB = videoClips[targetIndex + 1];
 
-    const clipA = videoClips[targetIndex];
-    const clipB = videoClips[targetIndex + 1];
-
-    const vA = document.createElement('video');
-    vA.src = clipA.src; vA.muted = true;
+    const vA = document.createElement('video'); vA.src = clipA.src; vA.muted = true;
     await new Promise(r => vA.onloadedmetadata = r);
     vA.currentTime = clipA.end - 0.05;
-    await new Promise(r => {
-      vA.onseeked = r;
-      setTimeout(r, 200);
-    });
-
+    await new Promise(r => { vA.onseeked = r; setTimeout(r, 200); });
     const canvasA = document.createElement('canvas');
     canvasA.width = vA.videoWidth || 1280; canvasA.height = vA.videoHeight || 720;
     canvasA.getContext('2d').drawImage(vA, 0, 0);
     lastExtractedFrames.a = canvasA.toDataURL('image/jpeg', 0.9);
 
-    const vB = document.createElement('video');
-    vB.src = clipB.src; vB.muted = true;
+    const vB = document.createElement('video'); vB.src = clipB.src; vB.muted = true;
     await new Promise(r => vB.onloadedmetadata = r);
     vB.currentTime = clipB.start;
-    await new Promise(r => {
-      vB.onseeked = r;
-      setTimeout(r, 200);
-    });
-
+    await new Promise(r => { vB.onseeked = r; setTimeout(r, 200); });
     const canvasB = document.createElement('canvas');
     canvasB.width = vB.videoWidth || 1280; canvasB.height = vB.videoHeight || 720;
     canvasB.getContext('2d').drawImage(vB, 0, 0);
     lastExtractedFrames.b = canvasB.toDataURL('image/jpeg', 0.9);
 
-    aiFrameA.src = lastExtractedFrames.a;
-    aiFrameB.src = lastExtractedFrames.b;
+    aiFrameA.src = lastExtractedFrames.a; aiFrameB.src = lastExtractedFrames.b;
     aiModal.style.display = 'flex';
   });
 
-  aiCloseModalBtn.addEventListener('click', () => {
-    aiModal.style.display = 'none';
-  });
-
+  aiCloseModalBtn.addEventListener('click', () => { aiModal.style.display = 'none'; });
   aiDownloadFramesBtn.addEventListener('click', () => {
-    const a1 = document.createElement('a');
-    a1.href = lastExtractedFrames.a; a1.download = 'kling_start_frame.jpg'; a1.click();
-    
-    setTimeout(() => {
-      const a2 = document.createElement('a');
-      a2.href = lastExtractedFrames.b; a2.download = 'kling_end_frame.jpg'; a2.click();
-    }, 300);
+    const a1 = document.createElement('a'); a1.href = lastExtractedFrames.a; a1.download = 'kling_start_frame.jpg'; a1.click();
+    setTimeout(() => { const a2 = document.createElement('a'); a2.href = lastExtractedFrames.b; a2.download = 'kling_end_frame.jpg'; a2.click(); }, 300);
   });
 
   splitBtn.addEventListener('click', () => {
@@ -840,10 +772,10 @@
       st.clip.end = st.localTime;
       const newClip = {
         id: 'v_' + Date.now(), file: st.clip.file, src: st.clip.src,
-        start: st.localTime, end: origEnd, duration: st.clip.duration, transition: 'none', thumbnails: null
+        start: st.localTime, end: origEnd, duration: st.clip.duration, transition: 'none', thumbnails: null,
+        width: st.clip.width, height: st.clip.height
       };
-      generateThumbnails(st.clip);
-      generateThumbnails(newClip);
+      generateThumbnails(st.clip); generateThumbnails(newClip);
       videoClips.splice(st.index + 1, 0, newClip);
       recalculateTimeline();
     }
@@ -853,21 +785,16 @@
     if (!selectedObject || videoClips.length <= 1) return;
     videoClips = videoClips.filter(c => c.id !== selectedObject.id);
     selectedObject = videoClips[0] ? { type: 'video', id: videoClips[0].id } : null;
-    recalculateTimeline(); seekToGlobalTime(0);
+    recalculateTimeline(); seekToGlobalTime(0); updatePlayerAspect();
   });
 
   snapshotBtn.addEventListener('click', () => {
     const canvas = document.createElement('canvas');
-    canvas.width = activeVideo.videoWidth || 1280;
-    canvas.height = activeVideo.videoHeight || 720;
+    canvas.width = activeVideo.videoWidth || 1280; canvas.height = activeVideo.videoHeight || 720;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(activeVideo, 0, 0, canvas.width, canvas.height);
     textElements.forEach(item => drawTextOnCanvas(ctx, canvas.width, canvas.height, item));
-    
-    const a = document.createElement('a');
-    a.href = canvas.toDataURL('image/png');
-    a.download = `snapshot_${Date.now()}.png`;
-    a.click();
+    const a = document.createElement('a'); a.href = canvas.toDataURL('image/png'); a.download = `snapshot_${Date.now()}.png`; a.click();
   });
 
   exportBtn.addEventListener('click', async () => {
@@ -876,9 +803,15 @@
     exportBtn.disabled = true;
     exportBtn.innerText = '⏳ Рендер...';
 
-    const [w, h] = exportRes.value.split('x').map(Number);
+    let w, h;
+    if (exportRes.value === 'original') {
+      w = videoClips[0].width || 1080;
+      h = videoClips[0].height || 1920;
+    } else {
+      [w, h] = exportRes.value.split('x').map(Number);
+    }
+
     const fps = parseInt(exportFps.value);
-    
     const canvas = document.createElement('canvas');
     canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext('2d', { alpha: false });
@@ -902,14 +835,13 @@
       a.download = `export_${Date.now()}.webm`;
       a.click();
       exportBtn.disabled = false;
-      exportBtn.innerText = '✨ Экспорт';
+      exportBtn.innerText = '✨ Экспорт (WebM)';
     };
 
     recorder.start();
 
     const exportVid = document.createElement('video');
-    exportVid.muted = true;
-    exportVid.playsInline = true;
+    exportVid.muted = true; exportVid.playsInline = true;
 
     for (let i = 0; i < videoClips.length; i++) {
       const clip = videoClips[i];
@@ -922,10 +854,7 @@
       while (t <= clip.end) {
         exportVid.currentTime = t;
         await new Promise(r => {
-          const seekCheck = () => {
-            exportVid.removeEventListener('seeked', seekCheck);
-            r();
-          };
+          const seekCheck = () => { exportVid.removeEventListener('seeked', seekCheck); r(); };
           exportVid.addEventListener('seeked', seekCheck);
           setTimeout(r, 100);
         });
@@ -935,9 +864,11 @@
 
         const vw = exportVid.videoWidth || w;
         const vh = exportVid.videoHeight || h;
+        
+        // Исправленное заполнение холста под оригинальные пропорции (без сплющивания и полос)
         const hRatio = w / vw;
         const vRatio = h / vh;
-        const ratio = Math.min(hRatio, vRatio);
+        const ratio = Math.max(hRatio, vRatio); // Заполняет весь вертикальный экран без черных полос по бокам
         const centerShiftX = (w - vw * ratio) / 2;
         const centerShiftY = (h - vh * ratio) / 2;
 
@@ -948,7 +879,6 @@
         t += step;
       }
     }
-
     recorder.stop();
   });
 </script>
