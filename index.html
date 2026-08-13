@@ -545,37 +545,33 @@
     recalculateTimeline(); seekToGlobalTime(0);
   });
 
-  // ЭКСПОРТ ЧЕРЕЗ MediaRecorder (Полностью стабильный без внешних либ)
+  // ЭКСПОРТ (Надежный покадровый рендеринг)
   exportBtn.addEventListener('click', async () => {
-    pause(); exportBtn.disabled = true;
+    pause(); 
+    exportBtn.disabled = true;
 
     const [w, h] = exportRes.value.split('x').map(Number);
     const fps = parseInt(exportFps.value);
     const canvas = document.createElement('canvas');
     canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext('2d', { alpha: false });
-    const transitionDuration = 2.0; // 2 секунды перехода
+    const transitionDuration = 2.0;
 
     const stream = canvas.captureStream(fps);
-    const audioDestination = new AudioContext().createMediaStreamDestination();
-    if (audioClips.length > 0 && externalAudio.src) {
-      try {
-        const sourceNode = new AudioContext().createMediaElementSource(externalAudio);
-        sourceNode.connect(audioDestination);
-        sourceNode.connect(new AudioContext().destination);
-        stream.addTrack(audioDestination.stream.getAudioTracks()[0]);
-      } catch (e) {}
-    }
-
     let recorder;
     try {
       recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9,opus' });
     } catch (e) {
-      recorder = new MediaRecorder(stream);
+      try {
+        recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+      } catch (err) {
+        recorder = new MediaRecorder(stream);
+      }
     }
 
     const chunks = [];
-    recorder.ondataavailable = e => chunks.push(e.data);
+    recorder.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+    
     recorder.onstop = () => {
       const blob = new Blob(chunks, { type: 'video/mp4' });
       const a = document.createElement('a');
@@ -592,19 +588,46 @@
     const tempVid1 = document.createElement('video');
     const tempVid2 = document.createElement('video');
     tempVid1.muted = true; tempVid2.muted = true;
+    tempVid1.playsInline = true; tempVid2.playsInline = true;
 
-    async function renderFrameToCanvas(videoEl, src, time) {
-      if (videoEl.src !== src) videoEl.src = src;
-      videoEl.currentTime = time;
-      await new Promise(r => {
-        const cb = () => { videoEl.removeEventListener('seeked', cb); r(); };
-        videoEl.addEventListener('seeked', cb);
+    // Предзагружаем видео для стабильного сика
+    tempVid1.src = videoClips[0].src;
+    await new Promise(r => tempVid1.onloadeddata = r);
+
+    function seekVideo(vEl, time) {
+      return new Promise(resolve => {
+        let finished = false;
+        const onSeeked = () => {
+          if (!finished) {
+            finished = true;
+            vEl.removeEventListener('seeked', onSeeked);
+            resolve();
+          }
+        };
+        vEl.addEventListener('seeked', onSeeked);
+        vEl.currentTime = time;
+        // Страховка на случай если событие seeked пропустилось
+        setTimeout(() => {
+          if (!finished) {
+            finished = true;
+            vEl.removeEventListener('seeked', onSeeked);
+            resolve();
+          }
+        }, 250);
       });
+    }
+
+    async function drawFrame(videoEl, src, time) {
+      if (videoEl.src !== src) {
+        videoEl.src = src;
+        await new Promise(r => videoEl.onloadeddata = r);
+      }
+      await seekVideo(videoEl, Math.min(time, videoEl.duration - 0.05));
 
       ctx.fillStyle = '#000000';
       ctx.fillRect(0, 0, w, h);
       
-      const vAspect = videoEl.videoWidth / videoEl.videoHeight;
+      const vAspect = videoEl.videoWidth / videoEl.videoHeight || 16/9;
       const cAspect = w / h;
       let dW = w, dH = h, dX = 0, dY = 0;
 
@@ -629,32 +652,33 @@
         const next = videoClips[st.index + 1];
 
         if (timeToEnd < transitionDuration && next && st.clip.transition !== 'none') {
-          const progress = timeToEnd / transitionDuration; // от 1 до 0
-          await renderFrameToCanvas(tempVid1, st.clip.src, st.localTime);
+          const progress = timeToEnd / transitionDuration;
+          await drawFrame(tempVid1, st.clip.src, st.localTime);
           
           ctx.save();
           if (st.clip.transition === 'fade') {
-            // Затухание через черный цвет
             ctx.fillStyle = `rgba(0,0,0, ${1.0 - progress})`;
             ctx.fillRect(0, 0, w, h);
           } else if (st.clip.transition === 'crossfade') {
-            // Плавное переливание (микс) одного видео в другое
-            await renderFrameToCanvas(tempVid2, next.src, next.start + (transitionDuration - timeToEnd));
+            await drawFrame(tempVid2, next.src, next.start + (transitionDuration - timeToEnd));
             ctx.globalAlpha = 1.0 - progress;
             ctx.drawImage(tempVid2, 0, 0, w, h);
           }
           ctx.restore();
         } else {
-          await renderFrameToCanvas(tempVid1, st.clip.src, st.localTime);
+          await drawFrame(tempVid1, st.clip.src, st.localTime);
         }
 
-        // Рендер всех текстовых слоев на кадр
         textElements.forEach(item => drawTextOnCanvas(ctx, w, h, item));
       }
+      
       exportBtn.innerText = `⏳ Экспорт: ${Math.round(((i + 1) / totalFrames) * 100)}%`;
-      await new Promise(r => setTimeout(r, 5));
+      // Даем браузеру передохнуть каждые 5 кадров
+      if (i % 5 === 0) await new Promise(r => setTimeout(r, 0));
     }
 
+    // Задержка перед остановкой рекордера, чтобы записался хвост
+    await new Promise(r => setTimeout(r, 300));
     recorder.stop();
   });
 </script>
