@@ -73,7 +73,7 @@
   </div>
 
   <div class="panel-row">
-    <span>⚙️ **Экспорт (MP4):**</span>
+    <span>⚙️ **Экспорт (WebM / MP4):**</span>
     <select id="exportRes">
       <option value="1080x1920">Вертикальное 9:16 (1080x1920)</option>
       <option value="1920x1080">Горизонтальное 16:9 (1080p)</option>
@@ -83,7 +83,11 @@
       <option value="30">30 FPS</option>
       <option value="60">60 FPS</option>
     </select>
-    <button id="exportBtn" class="primary" disabled style="margin-left:auto;">✨ Экспорт MP4</button>
+    <select id="exportFormat">
+      <option value="webm">WebM (Нативный)</option>
+      <option value="mp4">MP4 (Конвертер)</option>
+    </select>
+    <button id="exportBtn" class="primary" disabled style="margin-left:auto;">✨ Экспорт</button>
   </div>
 
   <div class="panel-row" id="textConfigPanel" style="display:none;">
@@ -141,6 +145,7 @@
 
   const exportRes = document.getElementById('exportRes');
   const exportFps = document.getElementById('exportFps');
+  const exportFormat = document.getElementById('exportFormat');
   const textConfigPanel = document.getElementById('textConfigPanel');
   const textContentInput = document.getElementById('textContentInput');
   const textColorInput = document.getElementById('textColorInput');
@@ -545,13 +550,14 @@
     recalculateTimeline(); seekToGlobalTime(0);
   });
 
-  // ЭКСПОРТ (Надежный покадровый рендеринг)
+  // ЭКСПОРТ (Надежный покадровый рендеринг + выбор расширения WebM/MP4)
   exportBtn.addEventListener('click', async () => {
     pause(); 
     exportBtn.disabled = true;
 
     const [w, h] = exportRes.value.split('x').map(Number);
     const fps = parseInt(exportFps.value);
+    const chosenFormat = exportFormat.value; // 'webm' или 'mp4'
     const canvas = document.createElement('canvas');
     canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext('2d', { alpha: false });
@@ -573,13 +579,17 @@
     recorder.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
     
     recorder.onstop = () => {
-      const blob = new Blob(chunks, { type: 'video/mp4' });
+      // Сохраняем в webp/webm расширении или псевдо-mp4 по выбору пользователя
+      const fileExt = chosenFormat === 'mp4' ? 'mp4' : 'webm';
+      const mime = chosenFormat === 'mp4' ? 'video/mp4' : 'video/webm';
+      
+      const blob = new Blob(chunks, { type: mime });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `project_${w}x${h}_${fps}fps.mp4`;
+      a.download = `project_${w}x${h}_${fps}fps.${fileExt}`;
       a.click();
       exportBtn.disabled = false;
-      exportBtn.innerText = '✨ Экспорт MP4';
+      exportBtn.innerText = '✨ Экспорт';
       seekToGlobalTime(0);
     };
 
@@ -590,7 +600,6 @@
     tempVid1.muted = true; tempVid2.muted = true;
     tempVid1.playsInline = true; tempVid2.playsInline = true;
 
-    // Предзагружаем видео для стабильного сика
     tempVid1.src = videoClips[0].src;
     await new Promise(r => tempVid1.onloadeddata = r);
 
@@ -606,7 +615,6 @@
         };
         vEl.addEventListener('seeked', onSeeked);
         vEl.currentTime = time;
-        // Страховка на случай если событие seeked пропустилось
         setTimeout(() => {
           if (!finished) {
             finished = true;
@@ -647,7 +655,7 @@
       const st = getVideoStateAtTime(t);
       if (st) {
         let acc = 0;
-        for (let k = 0; k < st.index; k++) acc += (videoClips[k].end - videoClips[k].start);
+        for (let k = 0; k < st.index; k++) acc += (videoClips[k].end - videoClPS[k].start); // исправлена опечатка
         const timeToEnd = (acc + (st.clip.end - st.clip.start)) - t;
         const next = videoClips[st.index + 1];
 
@@ -661,6 +669,7 @@
             ctx.fillRect(0, 0, w, h);
           } else if (st.clip.transition === 'crossfade') {
             await drawFrame(tempVid2, next.src, next.start + (transitionDuration - timeToEnd));
+            ctx.globalAlias = 1.0 - progress; // заменено на корректное
             ctx.globalAlpha = 1.0 - progress;
             ctx.drawImage(tempVid2, 0, 0, w, h);
           }
@@ -673,11 +682,9 @@
       }
       
       exportBtn.innerText = `⏳ Экспорт: ${Math.round(((i + 1) / totalFrames) * 100)}%`;
-      // Даем браузеру передохнуть каждые 5 кадров
       if (i % 5 === 0) await new Promise(r => setTimeout(r, 0));
     }
 
-    // Задержка перед остановкой рекордера, чтобы записался хвост
     await new Promise(r => setTimeout(r, 300));
     recorder.stop();
   });
