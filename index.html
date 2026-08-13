@@ -917,52 +917,6 @@
 
     recorder.start();
 
-   // Исправленная логика Экспорта
-  exportBtn.addEventListener('click', async () => {
-    if (!videoClips.length) return;
-    pause(); 
-    exportBtn.disabled = true;
-    exportBtn.innerText = '⏳ Рендер...';
-
-    const [w, h] = exportRes.value.split('x').map(Number);
-    const fps = parseInt(exportFps.value);
-    const chosenFormat = exportFormat.value;
-    
-    const canvas = document.createElement('canvas');
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext('2d', { alpha: false });
-
-    const stream = canvas.captureStream(fps);
-    let recorder;
-    try {
-      recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9,opus' });
-    } catch (e) {
-      try { recorder = new MediaRecorder(stream, { mimeType: 'video/webm' }); }
-      catch (err) { recorder = new MediaRecorder(stream); }
-    }
-
-    const chunks = [];
-    recorder.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
-    
-    recorder.onstop = () => {
-      const fileExt = chosenFormat === 'mp4' ? 'mp4' : 'webm';
-      const mime = chosenFormat === 'mp4' ? 'video/mp4' : 'video/webm';
-      const blob = new Blob(chunks, { type: mime });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `project_${w}x${h}_${fps}fps.${fileExt}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-
-      exportBtn.disabled = false;
-      exportBtn.innerText = '✨ Экспорт';
-      seekToGlobalTime(0);
-    };
-
-    recorder.start();
-
     const exportVid = document.createElement('video');
     exportVid.muted = true;
     exportVid.playsInline = true;
@@ -977,7 +931,6 @@
       while (t <= clip.end) {
         exportVid.currentTime = Math.min(t, clip.duration - 0.05);
         
-        // Надежное ожидание кадра с защитой от зависания (таймаут максимум 250мс на кадр)
         await new Promise(r => {
           let isDone = false;
           const finish = () => {
