@@ -277,40 +277,45 @@
   let isPlaying = false;
   let animId = null;
 
-  let thumbnailQueue = Promise.resolve();
-
-  function queueThumbnailGeneration(clip) {
-    thumbnailQueue = thumbnailQueue.then(() => generateThumbnails(clip));
-  }
-
+  // Быстрая генерация превью в фоновом режиме (как было, но с легковесным холстом)
   async function generateThumbnails(clip) {
-    if (clip.thumbnails) return clip.thumbnails;
+    if (clip.thumbnails) return;
+    clip.thumbnails = [];
+    
     const v = document.createElement('video');
     v.src = clip.src;
     v.muted = true;
+    v.preload = 'metadata';
+    
     await new Promise(r => { v.onloadedmetadata = r; });
 
-    const count = 3;
-    const step = (clip.end - clip.start) / count;
-    const thumbs = [];
+    const count = 2; // Уменьшили до 2 превью на клип для мгновенной отрисовки
+    const step = (clip.end - clip.start) / (count + 1);
     const canvas = document.createElement('canvas');
-    canvas.width = 50; canvas.height = 30;
+    canvas.width = 40; canvas.height = 24;
     const ctx = canvas.getContext('2d');
 
-    for (let i = 0; i < count; i++) {
-      const time = clip.start + (i * step) + (step / 2);
+    for (let i = 1; i <= count; i++) {
+      const time = clip.start + (i * step);
       v.currentTime = Math.min(time, clip.duration - 0.1);
+      
       await new Promise(r => {
-        const cb = () => { v.removeEventListener('seeked', cb); r(); };
-        v.addEventListener('seeked', cb);
+        const onSeeked = () => {
+          v.removeEventListener('seeked', onSeeked);
+          r();
+        };
+        v.addEventListener('seeked', onSeeked);
+        setTimeout(r, 100); // Защита от зависания событий seeked
       });
-      ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-      thumbs.push(canvas.toDataURL('image/jpeg', 0.4));
-      await new Promise(r => setTimeout(r, 10));
+
+      try {
+        ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+        clip.thumbnails.push(canvas.toDataURL('image/jpeg', 0.3));
+        renderVideoTrack(); // Сразу обновляем дорожку по мере готовности
+      } catch (e) {
+        break;
+      }
     }
-    clip.thumbnails = thumbs;
-    renderVideoTrack();
-    return thumbs;
   }
 
   fileInput.addEventListener('change', async (e) => {
@@ -332,7 +337,9 @@
         thumbnails: null
       };
       videoClips.push(clip);
-      queueThumbnailGeneration(clip);
+      
+      // Запускаем фоном без блокировки интерфейса
+      generateThumbnails(clip);
     }
 
     if (!selectedObject && videoClips.length) selectedObject = { type: 'video', id: videoClips[0].id };
@@ -657,8 +664,8 @@
         id: 'v_' + Date.now(), file: st.clip.file, src: st.clip.src,
         start: st.localTime, end: origEnd, duration: st.clip.duration, transition: 'none', thumbnails: null
       };
-      queueThumbnailGeneration(st.clip);
-      queueThumbnailGeneration(newClip);
+      generateThumbnails(st.clip);
+      generateThumbnails(newClip);
       videoClips.splice(st.index + 1, 0, newClip);
       recalculateTimeline();
     }
