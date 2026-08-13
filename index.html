@@ -28,6 +28,7 @@
 
     .panel-row { display: flex; gap: 10px; background: #141418; padding: 10px; border-radius: 8px; border: 1px solid #2b2d35; align-items: center; flex-wrap: wrap; font-size: 13px; }
     .panel-row select, .panel-row input { background: #2b2d35; color: #fff; border: 1px solid #3f4250; padding: 6px 10px; border-radius: 6px; font-size: 13px; outline: none; }
+    .panel-row input[type="color"] { padding: 0; width: 32px; height: 32px; border: none; cursor: pointer; }
 
     .timeline-wrapper { position: relative; width: 100%; background: #141418; border-radius: 8px; padding: 12px; border: 1px solid #2b2d35; user-select: none; display: flex; flex-direction: column; gap: 12px; }
     .track-title { font-size: 11px; color: #888; margin-bottom: 4px; font-weight: 600; letter-spacing: 0.5px; }
@@ -88,6 +89,7 @@
   <div class="panel-row" id="textConfigPanel" style="display:none;">
     <span>✍️ **Текст:**</span>
     <input type="text" id="textContentInput" placeholder="Текст титра..." style="flex:1;">
+    <label style="display:flex; align-items:center; gap:4px; font-size:12px;">Цвет: <input type="color" id="textColorInput" value="#ffffff"></label>
     <select id="textStyleSelect">
       <option value="classic">Классический</option>
       <option value="neon">Неоновый</option>
@@ -141,6 +143,7 @@
   const exportFps = document.getElementById('exportFps');
   const textConfigPanel = document.getElementById('textConfigPanel');
   const textContentInput = document.getElementById('textContentInput');
+  const textColorInput = document.getElementById('textColorInput');
   const textStyleSelect = document.getElementById('textStyleSelect');
   const textSizeSelect = document.getElementById('textSizeSelect');
   const deleteTextBtn = document.getElementById('deleteTextBtn');
@@ -252,7 +255,7 @@
   });
 
   addTextBtn.addEventListener('click', () => {
-    const newText = { id: 't_' + Date.now(), text: 'Ваш текст', x: 50, y: 50, style: 'classic', size: 36 };
+    const newText = { id: 't_' + Date.now(), text: 'Ваш текст', x: 50, y: 50, color: '#ffffff', style: 'classic', size: 36 };
     textElements.push(newText);
     selectText(newText.id);
     renderTextOverlays();
@@ -265,6 +268,7 @@
     if (txt) {
       textConfigPanel.style.display = 'flex';
       textContentInput.value = txt.text;
+      textColorInput.value = txt.color || '#ffffff';
       textStyleSelect.value = txt.style;
       textSizeSelect.value = txt.size;
     } else {
@@ -277,6 +281,10 @@
   textContentInput.addEventListener('input', () => {
     const txt = textElements.find(t => t.id === selectedTextId);
     if (txt) { txt.text = textContentInput.value; renderTextOverlays(); }
+  });
+  textColorInput.addEventListener('input', () => {
+    const txt = textElements.find(t => t.id === selectedTextId);
+    if (txt) { txt.color = textColorInput.value; renderTextOverlays(); }
   });
   textStyleSelect.addEventListener('change', () => {
     const txt = textElements.find(t => t.id === selectedTextId);
@@ -301,9 +309,10 @@
       el.style.left = `${item.x}%`;
       el.style.top = `${item.y}%`;
       el.style.fontSize = `${item.size}px`;
+      el.style.color = item.color || '#ffffff';
       el.style.transform = 'translate(-50%, -50%)';
       el.innerText = item.text;
-      applyTextStyle(el, item.style);
+      applyTextStyle(el, item.style, item.color);
 
       el.addEventListener('mousedown', (e) => {
         e.stopPropagation();
@@ -323,29 +332,29 @@
     });
   }
 
-  function applyTextStyle(el, style) {
+  function applyTextStyle(el, style, color = '#fff') {
     el.style.fontFamily = 'sans-serif';
     el.style.fontWeight = 'bold';
-    if (style === 'classic') { el.style.color = '#fff'; el.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)'; }
-    else if (style === 'neon') { el.style.color = '#00ffff'; el.style.textShadow = '0 0 10px #00ffff'; }
-    else if (style === 'outline') { el.style.color = '#fff'; el.style.webkitTextStroke = '1px black'; }
-    else if (style === 'retro') { el.style.color = '#ffeb3b'; el.style.textShadow = '2px 2px 0px #d32f2f'; }
+    if (style === 'classic') { el.style.color = color; el.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)'; }
+    else if (style === 'neon') { el.style.color = color; el.style.textShadow = `0 0 10px ${color}, 0 0 20px ${color}`; }
+    else if (style === 'outline') { el.style.color = color; el.style.webkitTextStroke = '1px black'; }
+    else if (style === 'retro') { el.style.color = color; el.style.textShadow = '2px 2px 0px #d32f2f'; }
   }
 
-  function drawTextOnCanvas(ctx, w, h) {
-    textElements.forEach(item => {
-      ctx.save();
-      ctx.font = `bold ${Math.round(item.size * (w / 950))}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      const x = (item.x / 100) * w, y = (item.y / 100) * h;
-      if (item.style === 'classic') { ctx.fillStyle = '#fff'; ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 10; }
-      else if (item.style === 'neon') { ctx.fillStyle = '#00ffff'; ctx.shadowColor = '#00ffff'; ctx.shadowBlur = 15; }
-      else if (item.style === 'outline') { ctx.fillStyle = '#fff'; ctx.lineWidth = 4; ctx.strokeStyle = '#000'; ctx.strokeText(item.text, x, y); }
-      else if (item.style === 'retro') { ctx.fillStyle = '#ffeb3b'; ctx.shadowColor = '#d32f2f'; ctx.shadowOffsetX = 4; ctx.shadowOffsetY = 4; }
-      ctx.fillText(item.text, x, y);
-      ctx.restore();
-    });
+  function drawTextOnCanvas(ctx, w, h, item) {
+    ctx.save();
+    ctx.font = `bold ${Math.round(item.size * (w / 950))}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const x = (item.x / 100) * w, y = (item.y / 100) * h;
+    const col = item.color || '#ffffff';
+    
+    if (item.style === 'classic') { ctx.fillStyle = col; ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 10; }
+    else if (item.style === 'neon') { ctx.fillStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 15; }
+    else if (item.style === 'outline') { ctx.fillStyle = col; ctx.lineWidth = 4; ctx.strokeStyle = '#000'; ctx.strokeText(item.text, x, y); }
+    else if (item.style === 'retro') { ctx.fillStyle = col; ctx.shadowColor = '#d32f2f'; ctx.shadowOffsetX = 4; ctx.shadowOffsetY = 4; }
+    ctx.fillText(item.text, x, y);
+    ctx.restore();
   }
 
   function enableControls() {
@@ -536,7 +545,7 @@
     recalculateTimeline(); seekToGlobalTime(0);
   });
 
-  // НАДЕЖНЫЙ ЭКСПОРТ ЧЕРЕЗ MediaRecorder (Без сторонних библиотек и ошибок)
+  // ЭКСПОРТ ЧЕРЕЗ MediaRecorder (Полностью стабильный без внешних либ)
   exportBtn.addEventListener('click', async () => {
     pause(); exportBtn.disabled = true;
 
@@ -545,16 +554,17 @@
     const canvas = document.createElement('canvas');
     canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext('2d', { alpha: false });
-    const transitionDuration = 2.0; // Длительность перехода теперь ровно 2 секунды
+    const transitionDuration = 2.0; // 2 секунды перехода
 
     const stream = canvas.captureStream(fps);
-    // Добавляем аудиодорожку, если она играет
     const audioDestination = new AudioContext().createMediaStreamDestination();
-    if (externalAudio.src) {
-      const sourceNode = new AudioContext().createMediaElementSource(externalAudio);
-      sourceNode.connect(audioDestination);
-      sourceNode.connect(new AudioContext().destination);
-      stream.addTrack(audioDestination.stream.getAudioTracks()[0]);
+    if (audioClips.length > 0 && externalAudio.src) {
+      try {
+        const sourceNode = new AudioContext().createMediaElementSource(externalAudio);
+        sourceNode.connect(audioDestination);
+        sourceNode.connect(new AudioContext().destination);
+        stream.addTrack(audioDestination.stream.getAudioTracks()[0]);
+      } catch (e) {}
     }
 
     let recorder;
@@ -578,13 +588,18 @@
     };
 
     recorder.start();
-    seekToGlobalTime(0);
-    play();
 
-    async function drawVideo(videoEl, src, time) {
+    const tempVid1 = document.createElement('video');
+    const tempVid2 = document.createElement('video');
+    tempVid1.muted = true; tempVid2.muted = true;
+
+    async function renderFrameToCanvas(videoEl, src, time) {
       if (videoEl.src !== src) videoEl.src = src;
       videoEl.currentTime = time;
-      await new Promise(r => setTimeout(r, 100));
+      await new Promise(r => {
+        const cb = () => { videoEl.removeEventListener('seeked', cb); r(); };
+        videoEl.addEventListener('seeked', cb);
+      });
 
       ctx.fillStyle = '#000000';
       ctx.fillRect(0, 0, w, h);
@@ -603,8 +618,6 @@
       ctx.drawImage(videoEl, dX, dY, dW, dH);
     }
 
-    // Рендер покадрово для точного сведения переходов 2 сек
-    pause();
     const totalFrames = Math.ceil(totalDuration * fps);
     for (let i = 0; i < totalFrames; i++) {
       const t = i / fps;
@@ -616,21 +629,30 @@
         const next = videoClips[st.index + 1];
 
         if (timeToEnd < transitionDuration && next && st.clip.transition !== 'none') {
-          const progress = timeToEnd / transitionDuration;
-          await drawVideo(activeVideo, st.clip.src, st.localTime);
+          const progress = timeToEnd / transitionDuration; // от 1 до 0
+          await renderFrameToCanvas(tempVid1, st.clip.src, st.localTime);
           
           ctx.save();
-          await drawVideo(nextVideo, next.src, next.start + (transitionDuration - timeToEnd));
-          ctx.globalAlpha = st.clip.transition === 'crossfade' ? (1.0 - progress) : (progress > 0.5 ? (1 - (1-progress)*2) : (progress*2));
+          if (st.clip.transition === 'fade') {
+            // Затухание через черный цвет
+            ctx.fillStyle = `rgba(0,0,0, ${1.0 - progress})`;
+            ctx.fillRect(0, 0, w, h);
+          } else if (st.clip.transition === 'crossfade') {
+            // Плавное переливание (микс) одного видео в другое
+            await renderFrameToCanvas(tempVid2, next.src, next.start + (transitionDuration - timeToEnd));
+            ctx.globalAlpha = 1.0 - progress;
+            ctx.drawImage(tempVid2, 0, 0, w, h);
+          }
           ctx.restore();
         } else {
-          await drawVideo(activeVideo, st.clip.src, st.localTime);
+          await renderFrameToCanvas(tempVid1, st.clip.src, st.localTime);
         }
 
-        drawTextOnCanvas(ctx, w, h);
+        // Рендер всех текстовых слоев на кадр
+        textElements.forEach(item => drawTextOnCanvas(ctx, w, h, item));
       }
       exportBtn.innerText = `⏳ Экспорт: ${Math.round(((i + 1) / totalFrames) * 100)}%`;
-      await new Promise(r => setTimeout(r, 10));
+      await new Promise(r => setTimeout(r, 5));
     }
 
     recorder.stop();
