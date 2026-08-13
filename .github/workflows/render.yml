@@ -1,0 +1,35 @@
+name: Video Render Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_json:
+        description: 'JSON манифест проекта'
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Run Render Script
+        env:
+          PROJECT_DATA: ${{ github.event.inputs.project_json }}
+        run: node render.js
+
+      - name: Upload Result Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: finished-video
+          path: output.mp4
