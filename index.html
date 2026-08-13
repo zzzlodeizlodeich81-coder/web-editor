@@ -68,6 +68,7 @@
     }
     button:hover { background: #3d3d3d; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
+    
     .timeline-container {
       margin-top: 20px;
       background: #252525;
@@ -105,7 +106,7 @@
     .clip.selected { border-color: #4fc3f7; }
     .clip-thumbnails {
       display: flex;
-      height: 35px;
+      height: 38px;
       width: 100%;
       background: #000;
     }
@@ -120,8 +121,8 @@
       align-items: center;
       padding: 0 4px;
       font-size: 11px;
-      background: rgba(0,0,0,0.6);
-      height: 20px;
+      background: rgba(0,0,0,0.7);
+      height: 22px;
     }
     .transition-badge {
       background: #555;
@@ -139,14 +140,36 @@
       padding: 5px;
       font-size: 12px;
     }
+
+    /* Кастомная рамка-бегунок (плейхед) как в CapCut */
     .playhead {
       position: absolute;
-      top: 0; bottom: 0; width: 2px;
-      background: #ff5252;
-      left: 0;
-      pointer-events: none;
-      z-index: 10;
+      top: 0; bottom: 0; width: 14px;
+      margin-left: -7px;
+      background: transparent;
+      cursor: ew-resize;
+      z-index: 20;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
     }
+    .playhead::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      width: 12px;
+      height: 12px;
+      background: #ff5252;
+      border-radius: 2px;
+    }
+    .playhead::after {
+      content: '';
+      position: absolute;
+      top: 12px; bottom: 0;
+      width: 2px;
+      background: #ff5252;
+    }
+
     .config-panel {
       margin-top: 10px;
       background: #2a2a2a;
@@ -265,7 +288,8 @@
 <div class="ai-modal" id="aiModal">
   <div class="ai-modal-content">
     <h3>Генерация перехода через Kling AI</h3>
-    <p>Экспортированы крайние кадры для стыка выбранных клипов. Вы можете использовать их в качестве Start/End image в нейросети.</p>
+    <p>💡 <b>Совет:</b> Для корректной работы AI-перехода и правильной стыковки убедитесь, что на таймлайне соединены строго 2 целевых отрезка видео.</p>
+    <p style="font-size: 13px; color: #bbb;">Экспортированы крайние кадры для стыка выбранных клипов. Вы можете использовать их в качестве Start/End image в нейросети:</p>
     <div class="ai-preview-row">
       <div class="ai-preview-box">
         <div style="font-size:12px; margin-bottom:5px;">Конец клипа А (Start):</div>
@@ -320,6 +344,7 @@
   const videoTrack = document.getElementById('videoTrack');
   const audioTrack = document.getElementById('audioTrack');
   const playhead = document.getElementById('playhead');
+  const timelineTracks = document.getElementById('timelineTracks');
 
   const aiModal = document.getElementById('aiModal');
   const aiCloseModalBtn = document.getElementById('aiCloseModalBtn');
@@ -345,6 +370,34 @@
 
   let lastExtractedFrames = { a: null, b: null };
 
+  // Логика перемещения рамки-плейхеда мышкой (CapCut style)
+  let isDraggingPlayhead = false;
+  playhead.addEventListener('mousedown', (e) => {
+    isDraggingPlayhead = true;
+    e.stopPropagation();
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isDraggingPlayhead || totalDuration <= 0) return;
+    const rect = timelineTracks.getBoundingClientRect();
+    let x = e.clientX - rect.left + timelineTracks.scrollLeft;
+    let percentage = Math.max(0, Math.min(1, x / timelineTracks.clientWidth));
+    seekToGlobalTime(percentage * totalDuration);
+  });
+
+  window.addEventListener('mouseup', () => {
+    isDraggingPlayhead = false;
+  });
+
+  timelineTracks.addEventListener('click', (e) => {
+    if (e.target === playhead || e.target.closest('.clip') || e.target.closest('.audio-clip')) return;
+    if (totalDuration <= 0) return;
+    const rect = timelineTracks.getBoundingClientRect();
+    let x = e.clientX - rect.left + timelineTracks.scrollLeft;
+    let percentage = Math.max(0, Math.min(1, x / timelineTracks.clientWidth));
+    seekToGlobalTime(percentage * totalDuration);
+  });
+
   async function generateThumbnails(clip) {
     if (clip.thumbnails) return;
     clip.thumbnails = [];
@@ -356,10 +409,10 @@
     
     await new Promise(r => { v.onloadedmetadata = r; });
 
-    const count = 2;
+    const count = 4;
     const step = (clip.end - clip.start) / (count + 1);
     const canvas = document.createElement('canvas');
-    canvas.width = 40; canvas.height = 24;
+    canvas.width = 60; canvas.height = 36;
     const ctx = canvas.getContext('2d');
 
     for (let i = 1; i <= count; i++) {
@@ -377,7 +430,7 @@
 
       try {
         ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-        clip.thumbnails.push(canvas.toDataURL('image/jpeg', 0.3));
+        clip.thumbnails.push(canvas.toDataURL('image/jpeg', 0.4));
         renderVideoTrack();
       } catch (e) {
         break;
@@ -720,12 +773,10 @@
   playBtn.addEventListener('click', () => isPlaying ? pause() : play());
   muteBtn.addEventListener('click', () => { isMuted = !isMuted; activeVideo.muted = isMuted; nextVideo.muted = isMuted; muteBtn.innerText = isMuted ? '🔇 Звук: Выкл' : '🔊 Звук: Вкл'; });
 
-  // Логика вызова AI-перехода для текущего выбранного или текущего активного стыка
   aiTransitionBtn.addEventListener('click', async () => {
     if (videoClips.length < 2) return;
     pause();
 
-    // Берем текущий клип (или первый попавшийся, если ничего не выбрано)
     let targetIndex = 0;
     if (selectedObject && selectedObject.type === 'video') {
       const idx = videoClips.findIndex(c => c.id === selectedObject.id);
@@ -735,7 +786,6 @@
     const clipA = videoClips[targetIndex];
     const clipB = videoClips[targetIndex + 1];
 
-    // Достаем последний кадр Клипа А
     const vA = document.createElement('video');
     vA.src = clipA.src; vA.muted = true;
     await new Promise(r => vA.onloadedmetadata = r);
@@ -750,7 +800,6 @@
     canvasA.getContext('2d').drawImage(vA, 0, 0);
     lastExtractedFrames.a = canvasA.toDataURL('image/jpeg', 0.9);
 
-    // Достаем первый кадр Клипа Б
     const vB = document.createElement('video');
     vB.src = clipB.src; vB.muted = true;
     await new Promise(r => vB.onloadedmetadata = r);
@@ -765,7 +814,6 @@
     canvasB.getContext('2d').drawImage(vB, 0, 0);
     lastExtractedFrames.b = canvasB.toDataURL('image/jpeg', 0.9);
 
-    // Показываем модальное окно с готовыми кадрами
     aiFrameA.src = lastExtractedFrames.a;
     aiFrameB.src = lastExtractedFrames.b;
     aiModal.style.display = 'flex';
@@ -776,7 +824,6 @@
   });
 
   aiDownloadFramesBtn.addEventListener('click', () => {
-    // Скачиваем оба кадра для удобства ручной загрузки в Kling AI
     const a1 = document.createElement('a');
     a1.href = lastExtractedFrames.a; a1.download = 'kling_start_frame.jpg'; a1.click();
     
@@ -824,17 +871,20 @@
     a.click();
   });
 
+  // Исправленная логика Экспорта
   exportBtn.addEventListener('click', async () => {
+    if (!videoClips.length) return;
     pause(); 
     exportBtn.disabled = true;
+    exportBtn.innerText = '⏳ Рендер...';
 
     const [w, h] = exportRes.value.split('x').map(Number);
     const fps = parseInt(exportFps.value);
     const chosenFormat = exportFormat.value;
+    
     const canvas = document.createElement('canvas');
     canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext('2d', { alpha: false });
-    const transitionDuration = 2.0;
 
     const stream = canvas.captureStream(fps);
     let recorder;
@@ -852,10 +902,14 @@
       const fileExt = chosenFormat === 'mp4' ? 'mp4' : 'webm';
       const mime = chosenFormat === 'mp4' ? 'video/mp4' : 'video/webm';
       const blob = new Blob(chunks, { type: mime });
+      const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
+      a.href = url;
       a.download = `project_${w}x${h}_${fps}fps.${fileExt}`;
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
+
       exportBtn.disabled = false;
       exportBtn.innerText = '✨ Экспорт';
       seekToGlobalTime(0);
@@ -863,82 +917,49 @@
 
     recorder.start();
 
-    const tempVid1 = document.createElement('video');
-    const tempVid2 = document.createElement('video');
-    tempVid1.muted = true; tempVid2.muted = true;
-    tempVid1.playsInline = true; tempVid2.playsInline = true;
+    // Быстрый покадровый рендер для экспорта
+    const exportVid = document.createElement('video');
+    exportVid.muted = true;
+    exportVid.playsInline = true;
 
-    tempVid1.src = videoClips[0].src;
-    await new Promise(r => tempVid1.onloadeddata = r);
+    for (let i = 0; i < videoClips.length; i++) {
+      const clip = videoClips[i];
+      exportVid.src = clip.src;
+      await new Promise(r => { exportVid.onloadedmetadata = r; });
 
-    function seekVideo(vEl, time) {
-      return new Promise(resolve => {
-        let finished = false;
-        const onSeeked = () => {
-          if (!finished) { finished = true; vEl.removeEventListener('seeked', onSeeked); resolve(); }
-        };
-        vEl.addEventListener('seeked', onSeeked);
-        vEl.currentTime = time;
-        setTimeout(() => {
-          if (!finished) { finished = true; vEl.removeEventListener('seeked', onSeeked); resolve(); }
-        }, 150);
-      });
-    }
+      const frameDuration = 1 / fps;
+      let t = clip.start;
+      while (t <= clip.end) {
+        exportVid.currentTime = Math.min(t, clip.duration - 0.05);
+        await new Promise(r => {
+          const onSeeked = () => {
+            exportVid.removeEventListener('seeked', onSeeked);
+            r();
+          };
+          exportVid.addEventListener('seeked', onSeeked);
+          setTimeout(r, 70); // таймаут на случай зависания seeked
+        });
 
-    async function drawFrame(videoEl, src, time) {
-      if (videoEl.src !== src) {
-        videoEl.src = src;
-        await new Promise(r => videoEl.onloadeddata = r);
-      }
-      await seekVideo(videoEl, Math.min(time, videoEl.duration - 0.05));
-
-      ctx.fillStyle = '#000000';
-      ctx.fillRect(0, 0, w, h);
-      
-      const vAspect = videoEl.videoWidth / videoEl.videoHeight || 16/9;
-      const cAspect = w / h;
-      let dW = w, dH = h, dX = 0, dY = 0;
-
-      if (vAspect > cAspect) { dH = w / vAspect; dY = (h - dH) / 2; }
-      else { dW = h * vAspect; dX = (w - dW) / 2; }
-      ctx.drawImage(videoEl, dX, dY, dW, dH);
-    }
-
-    const totalFrames = Math.ceil(totalDuration * fps);
-    for (let i = 0; i < totalFrames; i++) {
-      const t = i / fps;
-      const st = getVideoStateAtTime(t);
-      if (st) {
-        let acc = 0;
-        for (let k = 0; k < st.index; k++) acc += (videoClips[k].end - videoClips[k].start);
-        const timeToEnd = (acc + (st.clip.end - st.clip.start)) - t;
-        const next = videoClips[st.index + 1];
-
-        if (timeToEnd < transitionDuration && next && st.clip.transition !== 'none') {
-          const progress = timeToEnd / transitionDuration;
-          await drawFrame(tempVid1, st.clip.src, st.localTime);
-          
-          ctx.save();
-          if (st.clip.transition === 'fade') {
-            ctx.fillStyle = `rgba(0,0,0, ${1.0 - progress})`;
-            ctx.fillRect(0, 0, w, h);
-          }
-          ctx.restore();
-        } else {
-          await drawFrame(tempVid1, st.clip.src, st.localTime);
-        }
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, w, h);
+        try {
+          ctx.drawImage(exportVid, 0, 0, w, h);
+        } catch(err) {}
 
         textElements.forEach(item => drawTextOnCanvas(ctx, w, h, item));
+        
+        // Пауза под кадр
+        await new Promise(r => setTimeout(r, 1000 / fps));
+        t += frameDuration;
       }
-      
-      exportBtn.innerText = `⏳ Экспорт: ${Math.round(((i + 1) / totalFrames) * 100)}%`;
-      await new Promise(r => setTimeout(r, 0));
     }
 
-    await new Promise(r => setTimeout(r, 200));
-    recorder.stop();
+    setTimeout(() => {
+      if (recorder.state !== 'inactive') {
+        recorder.stop();
+      }
+    }, 500);
   });
 </script>
-
 </body>
 </html>
