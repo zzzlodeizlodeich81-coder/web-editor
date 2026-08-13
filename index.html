@@ -370,7 +370,6 @@
 
   let lastExtractedFrames = { a: null, b: null };
 
-  // Логика перемещения рамки-плейхеда мышкой (CapCut style)
   let isDraggingPlayhead = false;
   playhead.addEventListener('mousedown', (e) => {
     isDraggingPlayhead = true;
@@ -871,7 +870,6 @@
     a.click();
   });
 
-  // Исправленная логика Экспорта
   exportBtn.addEventListener('click', async () => {
     if (!videoClips.length) return;
     pause(); 
@@ -880,7 +878,6 @@
 
     const [w, h] = exportRes.value.split('x').map(Number);
     const fps = parseInt(exportFps.value);
-    const chosenFormat = exportFormat.value;
     
     const canvas = document.createElement('canvas');
     canvas.width = w; canvas.height = h;
@@ -897,22 +894,15 @@
 
     const chunks = [];
     recorder.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
-    
     recorder.onstop = () => {
-      const fileExt = chosenFormat === 'mp4' ? 'mp4' : 'webm';
-      const mime = chosenFormat === 'mp4' ? 'video/mp4' : 'video/webm';
-      const blob = new Blob(chunks, { type: mime });
+      const blob = new Blob(chunks, { type: 'video/webm' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `project_${w}x${h}_${fps}fps.${fileExt}`;
-      document.body.appendChild(a);
+      a.download = `export_${Date.now()}.webm`;
       a.click();
-      document.body.removeChild(a);
-
       exportBtn.disabled = false;
       exportBtn.innerText = '✨ Экспорт';
-      seekToGlobalTime(0);
     };
 
     recorder.start();
@@ -924,43 +914,44 @@
     for (let i = 0; i < videoClips.length; i++) {
       const clip = videoClips[i];
       exportVid.src = clip.src;
-      await new Promise(r => { exportVid.onloadedmetadata = r; });
+      await new Promise(r => exportVid.onloadedmetadata = r);
 
-      const frameDuration = 1 / fps;
       let t = clip.start;
+      const step = 1 / fps;
+
       while (t <= clip.end) {
-        exportVid.currentTime = Math.min(t, clip.duration - 0.05);
-        
+        exportVid.currentTime = t;
         await new Promise(r => {
-          let isDone = false;
-          const finish = () => {
-            if (isDone) return;
-            isDone = true;
-            exportVid.removeEventListener('seeked', finish);
+          const seekCheck = () => {
+            exportVid.removeEventListener('seeked', seekCheck);
             r();
           };
-          exportVid.addEventListener('seeked', finish);
-          setTimeout(finish, 250); 
+          exportVid.addEventListener('seeked', seekCheck);
+          setTimeout(r, 100);
         });
 
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, w, h);
-        try {
-          ctx.drawImage(exportVid, 0, 0, w, h);
-        } catch(err) {}
 
+        const vw = exportVid.videoWidth || w;
+        const vh = exportVid.videoHeight || h;
+        const hRatio = w / vw;
+        const vRatio = h / vh;
+        const ratio = Math.min(hRatio, vRatio);
+        const centerShiftX = (w - vw * ratio) / 2;
+        const centerShiftY = (h - vh * ratio) / 2;
+
+        ctx.drawImage(exportVid, 0, 0, vw, vh, centerShiftX, centerShiftY, vw * ratio, vh * ratio);
         textElements.forEach(item => drawTextOnCanvas(ctx, w, h, item));
-        
-        t += frameDuration;
+
+        await new Promise(r => setTimeout(r, 1000 / fps));
+        t += step;
       }
     }
 
-    setTimeout(() => {
-      if (recorder.state !== 'inactive') {
-        recorder.stop();
-      }
-    }, 400);
+    recorder.stop();
   });
 </script>
+
 </body>
 </html>
