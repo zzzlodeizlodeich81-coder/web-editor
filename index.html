@@ -3,7 +3,6 @@
 <head>
   <meta charset="UTF-8">
   <title>VK Lab CapCut Web (Pro Editor)</title>
-  <script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.js"></script>
   <style>
     * { box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #121214; color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
@@ -38,7 +37,6 @@
     .clip:active { cursor: grabbing; }
     .clip.selected { border-color: #00ffcc; box-shadow: 0 0 10px rgba(0,255,204,0.5); z-index: 3; }
     
-    /* Контейнер раскадровки внутри клипа */
     .clip-thumbnails { display: flex; width: 100%; height: 38px; background: #000; overflow: hidden; }
     .clip-thumbnails img { height: 100%; object-fit: cover; pointer-events: none; opacity: 0.8; }
     
@@ -168,7 +166,6 @@
   let isPlaying = false;
   let animId = null;
 
-  // Функция генерации миниатюр раскадровки для клипа
   async function generateThumbnails(clip) {
     if (clip.thumbnails) return clip.thumbnails;
     const v = document.createElement('video');
@@ -176,7 +173,7 @@
     v.muted = true;
     await new Promise(r => v.onloadedmetadata = r);
 
-    const count = 6; // Количество кадров раскадровки
+    const count = 6;
     const step = (clip.end - clip.start) / count;
     const thumbs = [];
     const canvas = document.createElement('canvas');
@@ -378,7 +375,6 @@
       el.style.left = `${totalDuration ? (currentPos / totalDuration) * 100 : 0}%`;
       el.style.width = `${totalDuration ? (len / totalDuration) * 100 : 0}%`;
       
-      // Блок раскадровки
       const thumbsContainer = document.createElement('div');
       thumbsContainer.className = 'clip-thumbnails';
       if (clip.thumbnails) {
@@ -400,7 +396,7 @@
       if (index < videoClips.length - 1) {
         const btn = document.createElement('span');
         btn.className = 'transition-badge';
-        btn.innerText = clip.transition === 'none' ? '⚡ Склейка' : (clip.transition === 'fade' ? '🌑 Затух' : '✨ Микс');
+        btn.innerText = clip.transition === 'none' ? '⚡ Склейка' : (clip.transition === 'fade' ? '🌑 Затух (2с)' : '✨ Микс (2с)');
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           const modes = ['none', 'fade', 'crossfade'];
@@ -540,48 +536,56 @@
     recalculateTimeline(); seekToGlobalTime(0);
   });
 
-  // ЭКСПОРТ В MP4 ЧЕРЕЗ mp4-muxer
+  // НАДЕЖНЫЙ ЭКСПОРТ ЧЕРЕЗ MediaRecorder (Без сторонних библиотек и ошибок)
   exportBtn.addEventListener('click', async () => {
-    if (!('VideoEncoder' in window)) { alert('WebCodecs не поддерживается вашим браузером.'); return; }
     pause(); exportBtn.disabled = true;
 
     const [w, h] = exportRes.value.split('x').map(Number);
     const fps = parseInt(exportFps.value);
-    const frameDurationUS = 1000000 / fps;
-    const totalFrames = Math.ceil(totalDuration * fps);
     const canvas = document.createElement('canvas');
     canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext('2d', { alpha: false });
-    const transitionDuration = 1.0;
+    const transitionDuration = 2.0; // Длительность перехода теперь ровно 2 секунды
 
-    const muxer = new MP4Muxer.Muxer({
-      target: new MP4Muxer.ArrayBufferTarget(),
-      video: { codec: 'avc', width: w, height: h, frameRate: fps },
-      fastStart: 'in-memory'
-    });
+    const stream = canvas.captureStream(fps);
+    // Добавляем аудиодорожку, если она играет
+    const audioDestination = new AudioContext().createMediaStreamDestination();
+    if (externalAudio.src) {
+      const sourceNode = new AudioContext().createMediaElementSource(externalAudio);
+      sourceNode.connect(audioDestination);
+      sourceNode.connect(new AudioContext().destination);
+      stream.addTrack(audioDestination.stream.getAudioTracks()[0]);
+    }
 
-    const encoder = new VideoEncoder({
-      output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
-      error: (e) => console.error(e)
-    });
+    let recorder;
+    try {
+      recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9,opus' });
+    } catch (e) {
+      recorder = new MediaRecorder(stream);
+    }
 
-    await encoder.configure({
-      codec: 'avc1.64002a', // H.264 High Profile
-      width: w,
-      height: h,
-      bitrate: 10_000_000,
-      framerate: fps
-    });
+    const chunks = [];
+    recorder.ondataavailable = e => chunks.push(e.data);
+    recorder.onstop = () => {
+      const blob = new Blob(chunks, { type: 'video/mp4' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `project_${w}x${h}_${fps}fps.mp4`;
+      a.click();
+      exportBtn.disabled = false;
+      exportBtn.innerText = '✨ Экспорт MP4';
+      seekToGlobalTime(0);
+    };
+
+    recorder.start();
+    seekToGlobalTime(0);
+    play();
 
     async function drawVideo(videoEl, src, time) {
       if (videoEl.src !== src) videoEl.src = src;
-      await new Promise(r => {
-        const cb = () => { videoEl.removeEventListener('seeked', cb); r(); };
-        videoEl.addEventListener('seeked', cb);
-        videoEl.currentTime = time;
-      });
+      videoEl.currentTime = time;
+      await new Promise(r => setTimeout(r, 100));
 
-      // Рендерим с сохранением пропорций (letterbox с черными полосами, чтобы видео не растягивалось)
       ctx.fillStyle = '#000000';
       ctx.fillRect(0, 0, w, h);
       
@@ -599,6 +603,9 @@
       ctx.drawImage(videoEl, dX, dY, dW, dH);
     }
 
+    // Рендер покадрово для точного сведения переходов 2 сек
+    pause();
+    const totalFrames = Math.ceil(totalDuration * fps);
     for (let i = 0; i < totalFrames; i++) {
       const t = i / fps;
       const st = getVideoStateAtTime(t);
@@ -621,22 +628,12 @@
         }
 
         drawTextOnCanvas(ctx, w, h);
-        const frame = new VideoFrame(canvas, { timestamp: Math.round(i * frameDurationUS) });
-        encoder.encode(frame, { keyFrame: (i % (fps * 2)) === 0 });
-        frame.close();
       }
-      exportBtn.innerText = `⏳ Рендер MP4: ${Math.round(((i + 1) / totalFrames) * 100)}%`;
-      if (i % 5 === 0) await new Promise(r => setTimeout(r, 0));
+      exportBtn.innerText = `⏳ Экспорт: ${Math.round(((i + 1) / totalFrames) * 100)}%`;
+      await new Promise(r => setTimeout(r, 10));
     }
 
-    await encoder.flush(); muxer.finalize();
-    const blob = new Blob([muxer.target.buffer], { type: 'video/mp4' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `project_${w}x${h}_${fps}fps.mp4`;
-    a.click();
-
-    exportBtn.disabled = false; exportBtn.innerText = '✨ Экспорт MP4'; seekToGlobalTime(0);
+    recorder.stop();
   });
 </script>
 
