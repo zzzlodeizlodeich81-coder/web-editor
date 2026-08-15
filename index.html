@@ -385,6 +385,14 @@
         form.enctype = 'multipart/form-data';
         form.style.display = 'none';
 
+        // 1. Обязательное поле key (путь/имя файла в бакете) должно идти ДО файла!
+        const keyInput = document.createElement('input');
+        keyInput.type = 'hidden';
+        keyInput.name = 'key';
+        keyInput.value = filename;
+        form.appendChild(keyInput);
+
+        // 2. Само поле файла идет последним
         const fileInputElem = document.createElement('input');
         fileInputElem.type = 'file';
         fileInputElem.name = 'file';
