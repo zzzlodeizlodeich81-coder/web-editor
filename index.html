@@ -289,7 +289,7 @@
 <div class="ai-modal" id="aiModal">
   <div class="ai-modal-content">
     <h3>Генерация перехода через Kling AI</h3>
-    <p>💡 <b>Совет:</b> Кадры автоматически вырезаются и отправляются в Yandex S3.</p>
+    <p>💡 <b>Совет:</b> Кадры автоматически вырезаются и отправляются в Yandex S3[cite: 1].</p>
     <div class="ai-preview-row">
       <div class="ai-preview-box">
         <div style="font-size:12px; margin-bottom:5px;">Конец клипа А (Start):</div>
@@ -369,46 +369,41 @@
 
   let lastExtractedFrames = { a: null, b: null };
 
-  // Функция загрузки в Яндекс S3
+  // Функция загрузки в Яндекс S3 через скрытую POST-форму (обход CORS и OPTIONS)
   async function uploadToYandexS3(dataUrl, filename) {
-    let accessKeyId = localStorage.getItem('YC_ACCESS_KEY');
-    let secretAccessKey = localStorage.getItem('YC_SECRET_KEY');
-
-    if (!accessKeyId || !secretAccessKey) {
-        accessKeyId = prompt("Введите Yandex Access Key ID:");
-        secretAccessKey = prompt("Введите Yandex Secret Access Key:");
-        if (!accessKeyId || !secretAccessKey) return null;
-        localStorage.setItem('YC_ACCESS_KEY', accessKeyId);
-        localStorage.setItem('YC_SECRET_KEY', secretAccessKey);
-    }
-
     const bucketName = 'my-video-storage'; 
-    const endpoint = `https://storage.yandexcloud.net/${bucketName}/${filename}`;
+    const endpoint = `https://storage.yandexcloud.net/${bucketName}/`;
 
     const res = await fetch(dataUrl);
     const blob = await res.blob();
+    const file = new File([blob], filename, { type: 'image/jpeg' });
 
-    try {
-        console.log("Загрузка файла в Yandex S3...", filename);
-        const response = await fetch(endpoint, {
-            method: 'PUT',
-            body: blob,
-            headers: {
-                'Content-Type': 'image/jpeg'
-            }
-        });
+    return new Promise((resolve) => {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = endpoint;
+        form.enctype = 'multipart/form-data';
+        form.style.display = 'none';
 
-        if (response.ok) {
-            console.log("Файл успешно загружен в S3!");
-            return endpoint;
-        } else {
-            console.error("Ошибка загрузки в S3:", response.statusText);
-            return null;
-        }
-    } catch (err) {
-        console.error("Сетевая ошибка при загрузке в S3:", err);
-        return null;
-    }
+        const fileInputElem = document.createElement('input');
+        fileInputElem.type = 'file';
+        fileInputElem.name = 'file';
+        
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+        fileInputElem.files = dataTransfer.files;
+
+        form.appendChild(fileInputElem);
+        document.body.appendChild(form);
+
+        console.log("Отправка файла через скрытую POST-форму в S3...", filename);
+        form.submit();
+        
+        setTimeout(() => {
+            form.remove();
+            resolve(endpoint + filename);
+        }, 1000);
+    });
   }
 
   let isDraggingPlayhead = false;
@@ -449,14 +444,13 @@
       const time = clip.start + (i * step);
       v.currentTime = Math.min(time, clip.duration - 0.1);
       
-      // Ждем честного сика и отрисовки кадра, чтобы миниатюры не были черными
       await new Promise(r => {
         const onSeeked = () => {
           v.removeEventListener('seeked', onSeeked);
           requestAnimationFrame(r);
         };
         v.addEventListener('seeked', onSeeked);
-        setTimeout(r, 300); // страховка от зависания событий
+        setTimeout(r, 300);
       });
 
       try {
@@ -802,7 +796,6 @@
   playBtn.addEventListener('click', () => isPlaying ? pause() : play());
   muteBtn.addEventListener('click', () => { isMuted = !isMuted; activeVideo.muted = isMuted; nextVideo.muted = isMuted; muteBtn.innerText = isMuted ? '🔇 Звук: Выкл' : '🔊 Звук: Вкл'; });
 
-  // Исправленная функция AI-перехода с надежным ожиданием декодирования кадров (без черноты)
   aiTransitionBtn.addEventListener('click', async () => {
     if (videoClips.length < 2) return;
     pause();
@@ -813,7 +806,6 @@
     }
     const clipA = videoClips[targetIndex], clipB = videoClips[targetIndex + 1];
 
-    // Вырезаем кадр А (конец клипа) с гарантированным ожиданием seeked
     const vA = document.createElement('video'); vA.src = clipA.src; vA.muted = true; vA.preload = 'auto';
     await new Promise(r => vA.onloadedmetadata = r);
     vA.currentTime = Math.max(0, clipA.end - 0.05);
@@ -827,7 +819,6 @@
     canvasA.getContext('2d').drawImage(vA, 0, 0);
     lastExtractedFrames.a = canvasA.toDataURL('image/jpeg', 0.9);
 
-    // Вырезаем кадр Б (начало клипа) с гарантированным ожиданием seeked
     const vB = document.createElement('video'); vB.src = clipB.src; vB.muted = true; vB.preload = 'auto';
     await new Promise(r => vB.onloadedmetadata = r);
     vB.currentTime = clipB.start;
@@ -845,7 +836,6 @@
     aiFrameB.src = lastExtractedFrames.b;
     aiModal.style.display = 'flex';
 
-    // Автоматическая загрузка в S3 в фоне
     aiDownloadFramesBtn.innerText = '⏳ Загрузка в S3...';
     aiDownloadFramesBtn.disabled = true;
 
