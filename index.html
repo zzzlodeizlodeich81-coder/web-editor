@@ -18,6 +18,7 @@
     .player-screen {
       position: relative;
       width: 100%;
+      max-height: 60vh;
       aspect-ratio: 16/9;
       background: #000;
       overflow: hidden;
@@ -30,6 +31,8 @@
       position: absolute;
       width: 100%;
       height: 100%;
+      max-width: 100%;
+      max-height: 100%;
       object-fit: contain;
       display: none;
     }
@@ -445,11 +448,17 @@
     for (let i = 1; i <= count; i++) {
       const time = clip.start + (i * step);
       v.currentTime = Math.min(time, clip.duration - 0.1);
+      
+      // Ждем честного сика и отрисовки кадра, чтобы миниатюры не были черными
       await new Promise(r => {
-        const onSeeked = () => { v.removeEventListener('seeked', onSeeked); r(); };
+        const onSeeked = () => {
+          v.removeEventListener('seeked', onSeeked);
+          requestAnimationFrame(r);
+        };
         v.addEventListener('seeked', onSeeked);
-        setTimeout(r, 100);
+        setTimeout(r, 300); // страховка от зависания событий
       });
+
       try {
         ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
         clip.thumbnails.push(canvas.toDataURL('image/jpeg', 0.4));
@@ -793,6 +802,7 @@
   playBtn.addEventListener('click', () => isPlaying ? pause() : play());
   muteBtn.addEventListener('click', () => { isMuted = !isMuted; activeVideo.muted = isMuted; nextVideo.muted = isMuted; muteBtn.innerText = isMuted ? '🔇 Звук: Выкл' : '🔊 Звук: Вкл'; });
 
+  // Исправленная функция AI-перехода с надежным ожиданием декодирования кадров (без черноты)
   aiTransitionBtn.addEventListener('click', async () => {
     if (videoClips.length < 2) return;
     pause();
@@ -803,27 +813,39 @@
     }
     const clipA = videoClips[targetIndex], clipB = videoClips[targetIndex + 1];
 
-    const vA = document.createElement('video'); vA.src = clipA.src; vA.muted = true;
+    // Вырезаем кадр А (конец клипа) с гарантированным ожиданием seeked
+    const vA = document.createElement('video'); vA.src = clipA.src; vA.muted = true; vA.preload = 'auto';
     await new Promise(r => vA.onloadedmetadata = r);
-    vA.currentTime = clipA.end - 0.05;
-    await new Promise(r => { vA.onseeked = r; setTimeout(r, 200); });
+    vA.currentTime = Math.max(0, clipA.end - 0.05);
+    await new Promise(r => {
+      const onSeeked = () => { vA.removeEventListener('seeked', onSeeked); requestAnimationFrame(r); };
+      vA.addEventListener('seeked', onSeeked);
+      setTimeout(r, 400);
+    });
     const canvasA = document.createElement('canvas');
     canvasA.width = vA.videoWidth || 1280; canvasA.height = vA.videoHeight || 720;
     canvasA.getContext('2d').drawImage(vA, 0, 0);
     lastExtractedFrames.a = canvasA.toDataURL('image/jpeg', 0.9);
 
-    const vB = document.createElement('video'); vB.src = clipB.src; vB.muted = true;
+    // Вырезаем кадр Б (начало клипа) с гарантированным ожиданием seeked
+    const vB = document.createElement('video'); vB.src = clipB.src; vB.muted = true; vB.preload = 'auto';
     await new Promise(r => vB.onloadedmetadata = r);
     vB.currentTime = clipB.start;
-    await new Promise(r => { vB.onseeked = r; setTimeout(r, 200); });
+    await new Promise(r => {
+      const onSeeked = () => { vB.removeEventListener('seeked', onSeeked); requestAnimationFrame(r); };
+      vB.addEventListener('seeked', onSeeked);
+      setTimeout(r, 400);
+    });
     const canvasB = document.createElement('canvas');
     canvasB.width = vB.videoWidth || 1280; canvasB.height = vB.videoHeight || 720;
     canvasB.getContext('2d').drawImage(vB, 0, 0);
     lastExtractedFrames.b = canvasB.toDataURL('image/jpeg', 0.9);
 
-    aiFrameA.src = lastExtractedFrames.a; aiFrameB.src = lastExtractedFrames.b;
+    aiFrameA.src = lastExtractedFrames.a; 
+    aiFrameB.src = lastExtractedFrames.b;
     aiModal.style.display = 'flex';
 
+    // Автоматическая загрузка в S3 в фоне
     aiDownloadFramesBtn.innerText = '⏳ Загрузка в S3...';
     aiDownloadFramesBtn.disabled = true;
 
