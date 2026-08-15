@@ -286,7 +286,7 @@
 <div class="ai-modal" id="aiModal">
   <div class="ai-modal-content">
     <h3>Генерация перехода через Kling AI</h3>
-    <p>💡 <b>Совет:</b> Для корректной работы AI-перехода убедитесь, что соединены строго 2 целевых отрезка видео.</p>
+    <p>💡 <b>Совет:</b> Кадры автоматически вырезаются и отправляются в Yandex S3.</p>
     <div class="ai-preview-row">
       <div class="ai-preview-box">
         <div style="font-size:12px; margin-bottom:5px;">Конец клипа А (Start):</div>
@@ -366,6 +366,48 @@
 
   let lastExtractedFrames = { a: null, b: null };
 
+  // Функция загрузки в Яндекс S3
+  async function uploadToYandexS3(dataUrl, filename) {
+    let accessKeyId = localStorage.getItem('YC_ACCESS_KEY');
+    let secretAccessKey = localStorage.getItem('YC_SECRET_KEY');
+
+    if (!accessKeyId || !secretAccessKey) {
+        accessKeyId = prompt("Введите Yandex Access Key ID:");
+        secretAccessKey = prompt("Введите Yandex Secret Access Key:");
+        if (!accessKeyId || !secretAccessKey) return null;
+        localStorage.setItem('YC_ACCESS_KEY', accessKeyId);
+        localStorage.setItem('YC_SECRET_KEY', secretAccessKey);
+    }
+
+    const bucketName = 'my-video-storage'; 
+    const endpoint = `https://storage.yandexcloud.net/${bucketName}/${filename}`;
+
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+
+    try {
+        console.log("Загрузка файла в Yandex S3...", filename);
+        const response = await fetch(endpoint, {
+            method: 'PUT',
+            body: blob,
+            headers: {
+                'Content-Type': 'image/jpeg'
+            }
+        });
+
+        if (response.ok) {
+            console.log("Файл успешно загружен в S3!");
+            return endpoint;
+        } else {
+            console.error("Ошибка загрузки в S3:", response.statusText);
+            return null;
+        }
+    } catch (err) {
+        console.error("Сетевая ошибка при загрузке в S3:", err);
+        return null;
+    }
+  }
+
   let isDraggingPlayhead = false;
   playhead.addEventListener('mousedown', (e) => { isDraggingPlayhead = true; e.stopPropagation(); });
   window.addEventListener('mousemove', (e) => {
@@ -433,12 +475,12 @@
       tempVid.preload = 'metadata';
       await new Promise(r => {
         tempVid.onloadedmetadata = r;
-        setTimeout(r, 500); // Страховка, если событие зависло
+        setTimeout(r, 500);
       });
 
       let duration = tempVid.duration;
       if (!duration || isNaN(duration) || !isFinite(duration)) {
-        duration = 5.0; // Дефолтное значение, если браузер не смог прочитать длительность
+        duration = 5.0;
       }
 
       const clip = {
@@ -781,6 +823,22 @@
 
     aiFrameA.src = lastExtractedFrames.a; aiFrameB.src = lastExtractedFrames.b;
     aiModal.style.display = 'flex';
+
+    aiDownloadFramesBtn.innerText = '⏳ Загрузка в S3...';
+    aiDownloadFramesBtn.disabled = true;
+
+    const s3NameA = `kling_start_${Date.now()}.jpg`;
+    const s3NameB = `kling_end_${Date.now()}.jpg`;
+
+    const urlA = await uploadToYandexS3(lastExtractedFrames.a, s3NameA);
+    const urlB = await uploadToYandexS3(lastExtractedFrames.b, s3NameB);
+
+    aiDownloadFramesBtn.disabled = false;
+    aiDownloadFramesBtn.innerText = '💾 Скачать кадры';
+
+    if (urlA && urlB) {
+        console.log("Ссылки на кадры в S3:", urlA, urlB);
+    }
   });
 
   aiCloseModalBtn.addEventListener('click', () => { aiModal.style.display = 'none'; });
