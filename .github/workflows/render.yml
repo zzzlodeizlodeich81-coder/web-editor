@@ -26,6 +26,7 @@ jobs:
       - name: Run Render Script
         env:
           PROJECT_DATA: ${{ github.event.inputs.project_json }}
+          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
         run: node render.js
 
       - name: Upload Result Artifact
